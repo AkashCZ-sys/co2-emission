@@ -55,7 +55,9 @@ MIDDLEWARE = [
     'logger.middleware.access_logger.AccessLoggerMiddleware',
     'logger.middleware.error_logger.ErrorLoggerMiddleware'
 ]
-
+REST_FRAMEWORK = {
+    'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
+}
 ROOT_URLCONF = 'carbon_emission.urls'
 
 TEMPLATES = [
@@ -94,7 +96,7 @@ else:
             "NAME": config("DATABASE_NAME"),
             "USER": config("DATABASE_USER"),
             "PASSWORD": config("DATABASE_PASSWORD"),
-            "HOST": config("DATABASE_HOST"),
+            "HOST": "localhost",
             "PORT": config("DATABASE_PORT"),
         },
     }
@@ -131,7 +133,12 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
 
-STATIC_URL = 'static/'
+# STATIC_URL = 'static/'
+MEDIA_URL = '/media/'
+MEDIA_ROOT = BASE_DIR / 'media'
+
+STATIC_URL = '/static/'
+STATIC_ROOT = BASE_DIR / 'staticfiles'
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
