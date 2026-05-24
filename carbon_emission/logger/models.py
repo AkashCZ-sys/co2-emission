@@ -1,5 +1,5 @@
 from django.db import models
-from vendor_booking_tool.utility import BaseUserModel
+from carbon_emission.utility import BaseUserModel
 
 # Create your models here.
 
