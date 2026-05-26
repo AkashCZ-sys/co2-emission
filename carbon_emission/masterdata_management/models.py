@@ -105,11 +105,7 @@ class ShipmentType(BaseUserModel):
     Master table to store types of shipments.
     Example: FCL, LCL, Courier, Express.
     """
-    mode = models.ForeignKey(
-        TransportMode,
-        on_delete=models.CASCADE,
-        related_name="shipment_types"
-    )
+    mode = models.PositiveIntegerField()
     shipment_type_name = models.CharField(max_length=50)
     description = models.TextField(null=True, blank=True)
     is_active = models.BooleanField(default=True)
