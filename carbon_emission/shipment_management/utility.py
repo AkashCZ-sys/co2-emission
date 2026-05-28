@@ -514,6 +514,124 @@ def get_total_cargo_weight(self):
     return total_weight
 
 
+class EmissionCalculationService:
+
+    def __init__(self, shipment):
+        self.shipment = shipment
+
+    def get_total_weight(self):
+
+        total = Decimal("0")
+
+        for load in self.shipment.load_details.all():
+            total += (
+                    load.weight_in_tonne
+                    * load.quantity
+            )
+
+        return total
+
+    def get_container_adjustment(self):
+
+        dominant = (
+            self.shipment.load_details.first()
+        )
+
+        if not dominant:
+            return Decimal("1")
+
+        return CONTAINER_ADJUSTMENTS.get(
+            dominant.container_type,
+            Decimal("1")
+        )
+
+    def get_emission_factor(self, segment):
+
+        mode = segment.transportation_mode
+
+        if mode == 5:
+
+            return OCEAN_FACTORS.get(
+                segment.freight_type,
+                Decimal("16")
+            )
+
+        elif mode == 10:
+
+            return AIR_FACTORS.get(
+                segment.freight_type,
+                Decimal("602")
+            )
+
+        elif mode == 15:
+
+            return ROAD_FACTORS.get(
+                segment.freight_type,
+                Decimal("62")
+            )
+
+        elif mode == 20:
+
+            return RAIL_FACTORS.get(
+                segment.freight_type,
+                Decimal("22")
+            )
+
+        return Decimal("0")
+
+    def calculate_segment_emission(
+            self,
+            segment,
+            distance
+    ):
+
+        cargo_weight = (
+            self.get_total_weight()
+        )
+
+        emission_factor = (
+            self.get_emission_factor(segment)
+        )
+
+        adjustment = (
+            self.get_container_adjustment()
+        )
+
+        transport_emission = (
+                                     distance
+                                     * cargo_weight
+                                     * emission_factor
+                                     * adjustment
+                             ) / Decimal("1000")
+
+        handling = Decimal("0")
+
+        if (
+                self.shipment.consider_handling_emission
+                and segment.transportation_mode == 5
+        ):
+            handling = (
+                    cargo_weight
+                    * distance
+                    * HANDLING_FACTOR
+            )
+
+        total = (
+                transport_emission
+                + handling
+        )
+
+        return {
+            "cargo_weight": cargo_weight,
+            "transport_emission": transport_emission,
+            "handling_emission": handling,
+            "total": total,
+            "distance": distance,
+            "factor": emission_factor,
+            "adjustment": adjustment,
+        }
+
+
 class ShipmentEmissionCalculator:
 
     def __init__(self, shipment):
@@ -639,7 +757,7 @@ class ShipmentEmissionCalculator:
         )
 
         for segment in segments:
-            result = SegmentEmissionCalculator(
+            result = EmissionCalculationService(
                 segment=segment,
                 cargo_weight=cargo_weight,
                 container_adjustment=container_adj,
@@ -991,121 +1109,3 @@ def calculate_distance(segment):
         return route['properties']['length']
 
     return haversine(origin, destination)
-
-
-class EmissionCalculationService:
-
-    def __init__(self, shipment):
-        self.shipment = shipment
-
-    def get_total_weight(self):
-
-        total = Decimal("0")
-
-        for load in self.shipment.load_details.all():
-            total += (
-                    load.weight_in_tonne
-                    * load.quantity
-            )
-
-        return total
-
-    def get_container_adjustment(self):
-
-        dominant = (
-            self.shipment.load_details.first()
-        )
-
-        if not dominant:
-            return Decimal("1")
-
-        return CONTAINER_ADJUSTMENTS.get(
-            dominant.container_type,
-            Decimal("1")
-        )
-
-    def get_emission_factor(self, segment):
-
-        mode = segment.transportation_mode
-
-        if mode == 5:
-
-            return OCEAN_FACTORS.get(
-                segment.freight_type,
-                Decimal("16")
-            )
-
-        elif mode == 10:
-
-            return AIR_FACTORS.get(
-                segment.freight_type,
-                Decimal("602")
-            )
-
-        elif mode == 15:
-
-            return ROAD_FACTORS.get(
-                segment.freight_type,
-                Decimal("62")
-            )
-
-        elif mode == 20:
-
-            return RAIL_FACTORS.get(
-                segment.freight_type,
-                Decimal("22")
-            )
-
-        return Decimal("0")
-
-    def calculate_segment_emission(
-            self,
-            segment,
-            distance
-    ):
-
-        cargo_weight = (
-            self.get_total_weight()
-        )
-
-        emission_factor = (
-            self.get_emission_factor(segment)
-        )
-
-        adjustment = (
-            self.get_container_adjustment()
-        )
-
-        transport_emission = (
-                                     distance
-                                     * cargo_weight
-                                     * emission_factor
-                                     * adjustment
-                             ) / Decimal("1000")
-
-        handling = Decimal("0")
-
-        if (
-                self.shipment.consider_handling_emission
-                and segment.transportation_mode == 5
-        ):
-            handling = (
-                    cargo_weight
-                    * distance
-                    * HANDLING_FACTOR
-            )
-
-        total = (
-                transport_emission
-                + handling
-        )
-
-        return {
-            "cargo_weight": cargo_weight,
-            "transport_emission": transport_emission,
-            "handling_emission": handling,
-            "total": total,
-            "distance": distance,
-            "factor": emission_factor,
-            "adjustment": adjustment,
-        }
