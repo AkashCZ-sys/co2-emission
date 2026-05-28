@@ -44,7 +44,7 @@ class Company(models.Model):
     country = models.PositiveIntegerField()
     email = models.EmailField(null=True, blank=True)
     phone = models.CharField(max_length=50, null=True, blank=True)
-    parent_company = models.PositiveIntegerField(null=True, blank=True)
+    # parent_company = models.PositiveIntegerField(null=True, blank=True)
     is_active = models.BooleanField(default=True)
     address = models.TextField(null=True, blank=True)
 
