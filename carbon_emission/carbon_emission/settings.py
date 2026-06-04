@@ -1,5 +1,7 @@
 import sys
 from pathlib import Path
+
+from corsheaders.defaults import default_headers
 from decouple import config
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -14,11 +16,13 @@ SECRET_KEY = 'django-insecure-o3hc_ihx&-wvv)gxii^#-v-o5$5ieq=v_ort4#(=)+t4l!pfh1
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = [
-    "127.0.0.1",
-    "localhost",
-    "192.168.0.97",
-]
+# ALLOWED_HOSTS = [
+#     "127.0.0.1",
+#     "localhost",
+#     "192.168.0.97",
+# ]
+
+ALLOWED_HOSTS = ["*"]
 
 # Application definition
 
@@ -30,8 +34,6 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
 
-    'requests',
-
     'corsheaders',
     'rest_framework',
     'drf_yasg',
@@ -40,28 +42,29 @@ INSTALLED_APPS = [
 
     'master_data_management',
     'shipment_management',
-
-    # 'logger'
-
 ]
-
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
-    'django.middleware.common.CommonMiddleware',
+
     'corsheaders.middleware.CorsMiddleware',
+
+    'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
-
-    # Custom middlewares for logger
-    # 'logger.middleware.access_logger.AccessLoggerMiddleware',
-    # 'logger.middleware.error_logger.ErrorLoggerMiddleware'
 ]
 REST_FRAMEWORK = {
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
 }
+
+CORS_ALLOW_ALL_ORIGINS = True
+
+CORS_ALLOW_HEADERS = list(default_headers) + [
+    "ngrok-skip-browser-warning",
+]
+
 ROOT_URLCONF = 'carbon_emission.urls'
 
 TEMPLATES = [

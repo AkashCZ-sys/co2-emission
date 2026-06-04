@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from master_data_management.models import Carrier, Country, Location, Company
+from master_data_management.models import Carrier, Country, Location
 
 
 class CountrySerializer(serializers.Serializer):
@@ -34,8 +34,14 @@ class CountrySerializer(serializers.Serializer):
 
 class CountryReadSerializer(serializers.ModelSerializer):
     class Meta:
-        model = Carrier
+        model = Country
         fields = '__all__'
+
+
+class CountryFilterSerializer(serializers.Serializer):
+    name = serializers.CharField(required=False, max_length=100, allow_blank=True, allow_null=True)
+    code = serializers.CharField(required=False, max_length=2, allow_blank=True, allow_null=True)
+    region = serializers.CharField(required=False, max_length=50, allow_blank=True, allow_null=True)
 
 
 class LocationSerializer(serializers.ModelSerializer):
@@ -82,6 +88,26 @@ class LocationSerializer(serializers.ModelSerializer):
         return instance
 
 
+class LocationReadSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Location
+        fields = '__all__'
+
+
+class LocationFilterSerializer(serializers.Serializer):
+    name = serializers.CharField(required=False, max_length=100, allow_blank=True, allow_null=True)
+    code = serializers.CharField(required=False, max_length=2, allow_blank=True, allow_null=True)
+    unlocode = serializers.CharField(required=False, max_length=50, allow_blank=True, allow_null=True)
+    iata_code = serializers.CharField(required=False, max_length=50, allow_blank=True, allow_null=True)
+    country = serializers.CharField(required=False, max_length=50, allow_blank=True, allow_null=True)
+    city = serializers.CharField(required=False, max_length=50, allow_blank=True, allow_null=True)
+    state = serializers.CharField(required=False, max_length=50, allow_blank=True, allow_null=True)
+    address = serializers.CharField(required=False, max_length=50, allow_blank=True, allow_null=True)
+    latitude = serializers.DecimalField(max_digits=9, decimal_places=6, )
+    longitude = serializers.DecimalField(max_digits=9, decimal_places=6, )
+    location_type = serializers.IntegerField(required=False, )
+
+
 class CarrierSerializer(serializers.ModelSerializer):
     class Meta:
         model = Carrier
@@ -101,6 +127,19 @@ class CarrierSerializer(serializers.ModelSerializer):
         return attrs
 
 
+class CarrierReadSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Carrier
+        fields = '__all__'
+
+
+class CarrierFilterSerializer(serializers.Serializer):
+    name = serializers.CharField(required=False, max_length=100, allow_blank=True, allow_null=True)
+    carrier_code = serializers.CharField(required=False, max_length=2, allow_blank=True, allow_null=True)
+    transportation_mode = serializers.IntegerField(required=False, )
+    is_active = serializers.BooleanField(required=False, allow_null=True)
+
+
 class CarrierDetailSerializer(serializers.ModelSerializer):
     name = serializers.CharField(max_length=100)
     carrier_code = serializers.CharField(max_length=50)
@@ -117,37 +156,53 @@ class CarrierDetailSerializer(serializers.ModelSerializer):
         instance.save()
         return instance
 
-
-class CompanySerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Company
-        fields = '__all__'
-
-    def validate(self, attrs):
-        name = attrs.get('name')
-        email = attrs.get('email')
-
-        if Company.objects.filter(name=name).exists():
-            raise serializers.ValidationError('Company already exists')
-        if Company.objects.filter(email=email).exists():
-            raise serializers.ValidationError('Email already exists')
-
-        return attrs
-
-
-class CompanyDetailSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Company
-        fields = '__all__'
-
-    def update(self, instance, validated_data):
-        instance.name = validated_data.get('name', instance.name)
-        instance.company_type = validated_data.get('company_type', instance.company_type)
-        instance.country = validated_data.get('country', instance.country)
-        instance.email = validated_data.get('email', instance.email)
-        instance.phone = validated_data.get('phone', instance.phone)
-        instance.is_active = validated_data.get('is_active', instance.is_active)
-        instance.address = validated_data.get('address', instance.address)
-
-        instance.save()
-        return instance
+#
+# class CompanySerializer(serializers.ModelSerializer):
+#     class Meta:
+#         model = Company
+#         fields = '__all__'
+#
+#     def validate(self, attrs):
+#         name = attrs.get('name')
+#         email = attrs.get('email')
+#
+#         if Company.objects.filter(name=name).exists():
+#             raise serializers.ValidationError('Company already exists')
+#         if Company.objects.filter(email=email).exists():
+#             raise serializers.ValidationError('Email already exists')
+#
+#         return attrs
+#
+#
+# class CompanyDetailSerializer(serializers.ModelSerializer):
+#     class Meta:
+#         model = Company
+#         fields = '__all__'
+#
+#     def update(self, instance, validated_data):
+#         instance.name = validated_data.get('name', instance.name)
+#         instance.company_type = validated_data.get('company_type', instance.company_type)
+#         instance.country = validated_data.get('country', instance.country)
+#         instance.email = validated_data.get('email', instance.email)
+#         instance.phone = validated_data.get('phone', instance.phone)
+#         instance.is_active = validated_data.get('is_active', instance.is_active)
+#         instance.address = validated_data.get('address', instance.address)
+#
+#         instance.save()
+#         return instance
+#
+#
+# class CompanyReadSerializer(serializers.ModelSerializer):
+#     class Meta:
+#         model = Company
+#         fields = '__all__'
+#
+#
+# class CompanyFilterSerializer(serializers.Serializer):
+#     name = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+#     short_name = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+#     company_type = serializers.IntegerField(required=False)
+#     country = serializers.IntegerField(required=False)
+#     email = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+#     is_active = serializers.BooleanField(required=False, allow_null=True)
+#

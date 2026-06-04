@@ -37,22 +37,22 @@ class Carrier(models.Model):
     class Meta:
         db_table = "CARRIER"
 
-class Company(models.Model):
-    name = models.CharField(max_length=255)
-    short_name = models.CharField(max_length=50, blank=True, null=True)
-    company_type = models.PositiveIntegerField()
-    country = models.PositiveIntegerField()
-    email = models.EmailField(null=True, blank=True)
-    phone = models.CharField(max_length=50, null=True, blank=True)
-    # parent_company = models.PositiveIntegerField(null=True, blank=True)
-    is_active = models.BooleanField(default=True)
-    address = models.TextField(null=True, blank=True)
-
-    class Meta:
-        db_table = "COMPANY"
-        verbose_name = "Company"
-        verbose_name_plural = "Companies"
-        ordering = ['name']
-
-    def __str__(self):
-        return self.name
+# class Company(models.Model):
+#     name = models.CharField(max_length=255)
+#     short_name = models.CharField(max_length=50, blank=True, null=True)
+#     company_type = models.PositiveIntegerField()
+#     country = models.PositiveIntegerField()
+#     email = models.EmailField(null=True, blank=True)
+#     phone = models.CharField(max_length=50, null=True, blank=True)
+#     # parent_company = models.PositiveIntegerField(null=True, blank=True)
+#     is_active = models.BooleanField(default=True)
+#     address = models.TextField(null=True, blank=True)
+#
+#     class Meta:
+#         db_table = "COMPANY"
+#         verbose_name = "Company"
+#         verbose_name_plural = "Companies"
+#         ordering = ['name']
+#
+#     def __str__(self):
+#         return self.name

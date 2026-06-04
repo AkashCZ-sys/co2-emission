@@ -1,9 +1,10 @@
 from django.db import models
-from master_data_management.models import Location,Company,Carrier,Country
+from master_data_management.models import Location, Carrier
+
 
 class ShipmentOrder(models.Model):
     shipment_number = models.CharField(max_length=100, unique=True)
-    customer = models.ForeignKey(Company, on_delete=models.CASCADE)
+    # customer = models.ForeignKey(Company, on_delete=models.CASCADE)
     cargo_type = models.CharField(max_length=50)
     cargo_temperature_type = models.CharField(max_length=30, blank=True)
     cargo_weight_unit = models.CharField(max_length=20)
