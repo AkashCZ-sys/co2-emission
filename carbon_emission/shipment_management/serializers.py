@@ -1,234 +1,164 @@
 from decimal import Decimal
 
-from django.db import transaction
 from rest_framework import serializers
 
-from shipment_management.models import ShipmentOrder, ShipmentSegment, ShipmentSegmentEmission, ShipmentLoadDetail
-from shipment_management.utility import calculate_distance, EmissionCalculationService, CONTAINER_ADJUSTMENTS
+from shipment_management.models import ShipmentOrder, ShipmentLoadDetail, ShipmentSegment
+from shipment_management.utility import ShipmentEmissionCalculator
 
 
-class ShipmentSegmentEmissionSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = ShipmentSegmentEmission
-        fields = (
-            "cargo_weight_tonne",
-            "distance_km",
-            "emission_factor",
-            "load_factor",
-            "container_adjustment_factor",
-            "handling_emission_kg",
-            "co2_kg",
-            "calculation_metadata",
-        )
+# ---------------------------------------------------------------------------
+# Shared sub-serializers
+# ---------------------------------------------------------------------------
+
+class ShipmentSegmentEmissionSerializer(serializers.Serializer):
+    cargo_weight_tonne = serializers.DecimalField(max_digits=12, decimal_places=2)
+    distance_km = serializers.DecimalField(max_digits=15, decimal_places=2)
+    emission_factor = serializers.DecimalField(max_digits=12, decimal_places=6)
+    load_factor = serializers.DecimalField(max_digits=8, decimal_places=4)
+    container_adjustment_factor = serializers.DecimalField(max_digits=8, decimal_places=4)
+    handling_emission_kg = serializers.DecimalField(max_digits=15, decimal_places=4)
+    co2_kg = serializers.DecimalField(max_digits=18, decimal_places=4)
+    calculation_metadata = serializers.JSONField(required=False)
 
 
-class ShipmentSegmentSerializer(serializers.ModelSerializer):
-    emission = ShipmentSegmentEmissionSerializer(required=False)
-
-    # emission1 = ShipmentSegmentEmissionSerializer(required=False)
-
-    class Meta:
-        model = ShipmentSegment
-        exclude = ("shipment_order",)
+class ShipmentLoadDetailSerializer(serializers.Serializer):
+    id = serializers.IntegerField(required=False)
+    container_type = serializers.CharField()
+    quantity = serializers.IntegerField()
+    weight_in_tonne = serializers.DecimalField(max_digits=12, decimal_places=2)
 
 
-class ShipmentLoadDetailSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = ShipmentLoadDetail
-        exclude = ("shipment_order",)
+# ---------------------------------------------------------------------------
+# Write (create) serializers
+# ---------------------------------------------------------------------------
+
+class ShipmentSegmentWriteSerializer(serializers.Serializer):
+    """Used during ShipmentOrder creation — accepts the inbound payload."""
+    id = serializers.IntegerField(required=False)
+    sequence_number = serializers.IntegerField()
+    transportation_mode = serializers.IntegerField()
+    # carrier may arrive as int (FK id) or string — store as string
+    carrier = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+    freight_type = serializers.CharField(required=False, allow_blank=True)
+    region = serializers.CharField(required=False, allow_blank=True)
+    origin_location = serializers.CharField(max_length=20, allow_blank=True, allow_null=True, required=True)
+    destination_location = serializers.CharField(max_length=20, allow_blank=True, allow_null=True, required=True)
+    origin_latitude = serializers.DecimalField(max_digits=10, decimal_places=7, required=False, allow_null=True)
+    origin_longitude = serializers.DecimalField(max_digits=10, decimal_places=7, required=False, allow_null=True)
+    destination_latitude = serializers.DecimalField(max_digits=10, decimal_places=7, required=False, allow_null=True)
+    destination_longitude = serializers.DecimalField(max_digits=10, decimal_places=7, required=False, allow_null=True)
+    distance_km = serializers.DecimalField(max_digits=15, decimal_places=2, required=False, default=Decimal("0"))
+    route_factor = serializers.DecimalField(max_digits=8, decimal_places=4, required=False, default=Decimal("1.0"))
+
+    def validate_carrier(self, value):
+        """Accept numeric or string carrier — always store as string."""
+        if value is None:
+            return ""
+        return str(value)
 
 
-class ShipmentOrderCreateSerializer(serializers.ModelSerializer):
-    load_details = ShipmentLoadDetailSerializer(many=True, required=False)
-    segments = ShipmentSegmentSerializer(many=True, required=False)
+class ShipmentOrderCreateSerializer(serializers.Serializer):
+    shipment_number = serializers.CharField()
+    cargo_type = serializers.CharField()
+    cargo_temperature_type = serializers.CharField(required=False, allow_blank=True, default="")
+    cargo_weight_unit = serializers.CharField()
+    container_load_type = serializers.CharField()
+    consider_handling_emission = serializers.BooleanField(required=False, default=True)
+    load_details = ShipmentLoadDetailSerializer(many=True, required=False, default=list)
+    segments = ShipmentSegmentWriteSerializer(many=True, required=False, default=list)
 
-    class Meta:
-        model = ShipmentOrder
-        fields = ('shipment_number',
-                  'load_details',
-                  'segments',
-                  'cargo_type',
-                  'cargo_temperature_type',
-                  'cargo_weight_unit',
-                  'container_load_type',)
-
-    @transaction.atomic
     def create(self, validated_data):
-
-        load_details_data = validated_data.pop('load_details', [])
-        segments_data = validated_data.pop('segments', [])
-
-        # Create Shipment
+        load_details_data = validated_data.pop("load_details", [])
+        segments_data = validated_data.pop("segments", [])
+        # 1. Create the ShipmentOrder
         shipment_order = ShipmentOrder.objects.create(**validated_data)
 
-        # Create Load Details
-        for load_detail_data in load_details_data:
-            ShipmentLoadDetail.objects.create(
-                shipment_order=shipment_order,
-                **load_detail_data
-            )
+        # 2. Create load details
+        for ld in load_details_data:
+            ld.pop("id", None)
+            ShipmentLoadDetail.objects.create(shipment_order=shipment_order, **ld)
 
-        # ---------------------------------------------------
-        # Shipment-level calculations
-        # ---------------------------------------------------
+        # 3. Create segments
+        for seg in segments_data:
+            seg.pop("id", None)
+            ShipmentSegment.objects.create(shipment_order=shipment_order, **seg)
 
-        cargo_weight = 0.0
+        # 4. Re-fetch with related data so the calculator can access them
+        shipment_order.refresh_from_db()
 
-        for load in shipment_order.load_details.all():
-            cargo_weight += (
-                    float(load.weight_in_tonne)
-                    * float(load.quantity)
-            )
+        # 5. Calculate emissions — also persists ShipmentSegmentEmission rows
+        emission_result = ShipmentEmissionCalculator(shipment_order).calculate()
 
-        total_qty = 0.0
-        weighted_sum = 0.0
-
-        for load in shipment_order.load_details.all():
-            factor = float(
-                CONTAINER_ADJUSTMENTS.get(
-                    load.container_type,
-                    1.0
-                )
-            )
-
-            weighted_sum += (
-                    factor * float(load.quantity)
-            )
-
-            total_qty += float(load.quantity)
-
-        container_adjustment = (
-            weighted_sum / total_qty
-            if total_qty else 1.0
-        )
-
-        load_factor = 1.0
-
-        total_distance = 0.0
-        total_co2 = 0.0
-
-        for segment_data in segments_data:
-            segment_data.pop(
-                "emission",
-                None
-            )
-
-            segment = ShipmentSegment.objects.create(
-                shipment_order=shipment_order,
-                **segment_data
-            )
-
-            # Calculate emission
-            service = EmissionCalculationService(
-                segment=segment,
-                cargo_weight=cargo_weight,
-                container_adjustment=container_adjustment,
-                load_factor=load_factor
-            )
-
-            result = service.calculate()
-
-            # Save emission record
-            ShipmentSegmentEmission.objects.create(
-                shipment_segment=segment,
-                cargo_weight_tonne=result[
-                    "cargo_weight_t"
-                ],
-                distance_km=result[
-                    "distance_km"
-                ],
-                emission_factor=result[
-                    "emission_factor_g_per_tkm"
-                ],
-                load_factor=result[
-                    "load_factor"
-                ],
-                container_adjustment_factor=result[
-                    "container_adjustment"
-                ],
-                handling_emission_kg=result[
-                    "handling_emission"
-                ],
-                co2_kg=result[
-                    "co2e_kg"
-                ],
-                calculation_metadata={
-                    "formula": "ISO14083_GLEC",
-                    "transport_emission": str(
-                        result[
-                            "transport_emission"
-                        ]
-                    ),
-                    "handling_emission": str(
-                        result[
-                            "handling_emission"
-                        ]
-                    ),
-                }
-            )
-
-            # Update segment distance
-            segment.distance_km = result[
-                "distance_km"
-            ]
-
-            segment.calculated_distance_km = result[
-                "distance_km"
-            ]
-
-            segment.save(
-                update_fields=[
-                    "distance_km",
-                    "calculated_distance_km"
-                ]
-            )
-
-            total_distance += float(
-                result["distance_km"]
-            )
-
-            total_co2 += float(
-                result["co2e_kg"]
-            )
-
-        # ---------------------------------------------------
-        # Update Shipment Totals
-        # ---------------------------------------------------
-
-        shipment_order.total_distance_km = total_distance
-        shipment_order.total_co2_kg = total_co2
-
-        shipment_order.save(
-            update_fields=[
-                "total_distance_km",
-                "total_co2_kg"
-            ]
-        )
+        # 6. Save shipment-level totals
+        total_distance = sum(seg_result["distance_km"] for seg_result in emission_result["segments"])
+        shipment_order.total_weight_in_tonne = Decimal(str(emission_result["cargo_weight"]))
+        shipment_order.total_co2_kg = Decimal(str(emission_result["grand_total"]))
+        shipment_order.total_distance_km = Decimal(str(round(total_distance, 2)))
+        shipment_order.save(update_fields=["total_weight_in_tonne", "total_distance_km", "total_co2_kg"])
 
         return shipment_order
 
 
-class ShipmentSegmentReadSerializer(serializers.ModelSerializer):
-    emission = ShipmentSegmentEmissionSerializer(read_only=True)
+class ShipmentSegmentReadSerializer(serializers.Serializer):
+    id = serializers.IntegerField()
+    shipment_order = serializers.PrimaryKeyRelatedField(read_only=True)
+    sequence_number = serializers.IntegerField()
+    transportation_mode = serializers.IntegerField()
+    carrier = serializers.CharField(required=False, allow_blank=True)
+    freight_type = serializers.CharField(required=False, allow_blank=True)
+    region = serializers.CharField(required=False, allow_blank=True)
+    origin_location = serializers.CharField(max_length=20, allow_blank=True, allow_null=True, required=True)
+    destination_location = serializers.CharField(max_length=20, allow_blank=True, allow_null=True, required=True)
+    origin_latitude = serializers.DecimalField(max_digits=10, decimal_places=7, required=False, allow_null=True)
+    origin_longitude = serializers.DecimalField(max_digits=10, decimal_places=7, required=False, allow_null=True)
+    destination_latitude = serializers.DecimalField(max_digits=10, decimal_places=7, required=False, allow_null=True)
+    destination_longitude = serializers.DecimalField(max_digits=10, decimal_places=7, required=False, allow_null=True)
+    distance_km = serializers.DecimalField(max_digits=15, decimal_places=2)
+    route_factor = serializers.DecimalField(max_digits=8, decimal_places=4)
+    calculated_distance_km = serializers.DecimalField(max_digits=15, decimal_places=2)
+    emission = ShipmentSegmentEmissionSerializer(required=False, read_only=True)
 
-    class Meta:
-        model = ShipmentSegment
-        fields = "__all__"
+
+class ShipmentOrderReadSerializer(serializers.Serializer):
+    id = serializers.IntegerField()
+    shipment_number = serializers.CharField()
+    cargo_type = serializers.CharField()
+    cargo_temperature_type = serializers.CharField(required=False, allow_blank=True)
+    cargo_weight_unit = serializers.CharField()
+    container_load_type = serializers.CharField()
+    consider_handling_emission = serializers.BooleanField()
+    total_weight_in_tonne = serializers.DecimalField(max_digits=12, decimal_places=2)
+    total_distance_km = serializers.DecimalField(max_digits=15, decimal_places=2)
+    total_co2_kg = serializers.DecimalField(max_digits=18, decimal_places=4)
+    load_details = ShipmentLoadDetailSerializer(many=True, required=False)
+    segments = ShipmentSegmentReadSerializer(many=True, required=False)
+
+    def to_representation(self, instance):
+        if not hasattr(instance, "_prefetched_objects_cache"):
+            instance._segments_qs = (
+                ShipmentSegment.objects
+                .filter(shipment_order=instance)
+                .select_related("emission")
+                .order_by("sequence_number")
+            )
+        return super().to_representation(instance)
+
+    def get_fields(self):
+        fields = super().get_fields()
+        return fields
 
 
-class ShipmentOrderReadSerializer(serializers.ModelSerializer):
-    load_details = ShipmentLoadDetailSerializer(many=True, read_only=True)
-    segments = ShipmentSegmentReadSerializer(many=True, read_only=True)
-
-    class Meta:
-        model = ShipmentOrder
-        fields = "__all__"
-
-
-class ShipmentReadSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = ShipmentOrder
-        fields = "__all__"
+class ShipmentReadSerializer(serializers.Serializer):
+    id = serializers.IntegerField()
+    shipment_number = serializers.CharField()
+    cargo_type = serializers.CharField()
+    cargo_temperature_type = serializers.CharField(required=False, allow_blank=True)
+    cargo_weight_unit = serializers.CharField()
+    container_load_type = serializers.CharField()
+    consider_handling_emission = serializers.BooleanField()
+    total_weight_in_tonne = serializers.DecimalField(max_digits=12, decimal_places=2)
+    total_distance_km = serializers.DecimalField(max_digits=15, decimal_places=2)
+    total_co2_kg = serializers.DecimalField(max_digits=18, decimal_places=4)
 
 
 class ShipmentFilterSerializer(serializers.Serializer):
@@ -241,3 +171,93 @@ class ShipmentFilterSerializer(serializers.Serializer):
     total_weight_in_tonne = serializers.FloatField(required=False)
     total_distance_km = serializers.FloatField(required=False)
     total_co2_kg = serializers.FloatField(required=False)
+
+
+# serializers.py
+
+class SegmentEmissionBreakdownSerializer(serializers.Serializer):
+    """Per-segment slice — mirrors ShipmentSegmentReadSerializer.emission"""
+    sequence_number = serializers.IntegerField()
+    origin_location = serializers.CharField()
+    destination_location = serializers.CharField()
+    transportation_mode = serializers.IntegerField()
+    freight_type = serializers.CharField()
+    distance_km = serializers.DecimalField(max_digits=15, decimal_places=2)
+    calculated_distance_km = serializers.DecimalField(max_digits=15, decimal_places=2)
+    # from the related ShipmentSegmentEmission row
+    cargo_weight_tonne = serializers.DecimalField(
+        source="emission.cargo_weight_tonne",
+        max_digits=12,
+        decimal_places=2,
+        read_only=True
+    )
+
+    emission_factor = serializers.DecimalField(
+        source="emission.emission_factor",
+        max_digits=12,
+        decimal_places=6,
+        read_only=True
+    )
+
+    load_factor = serializers.DecimalField(
+        source="emission.load_factor",
+        max_digits=8,
+        decimal_places=4,
+        read_only=True
+    )
+
+    container_adjustment_factor = serializers.DecimalField(
+        source="emission.container_adjustment_factor",
+        max_digits=8,
+        decimal_places=4,
+        read_only=True
+    )
+
+    handling_emission_kg = serializers.DecimalField(
+        source="emission.handling_emission_kg",
+        max_digits=15,
+        decimal_places=4,
+        read_only=True
+    )
+
+    co2_kg = serializers.DecimalField(
+        source="emission.co2_kg",
+        max_digits=18,
+        decimal_places=4,
+        read_only=True
+    )
+
+    def get_transport_emission_kg(self, obj):
+        transport_emission_kg = serializers.SerializerMethodField()
+        metadata = getattr(obj.emission, "calculation_metadata", {}) or {}
+        return metadata.get(transport_emission_kg, 0.0)
+
+
+class ShipmentEmissionSummarySerializer(serializers.Serializer):
+    """
+    Combines ShipmentOrderReadSerializer (overall totals)
+    + ShipmentSegmentReadSerializer (per-segment breakdown)
+    into one response shape.
+    """
+    id = serializers.IntegerField()
+    shipment_number = serializers.CharField()
+    cargo_type = serializers.CharField()
+    container_load_type = serializers.CharField()
+
+    # --- overall (from ShipmentOrder fields) ---
+    overall = serializers.SerializerMethodField()
+
+    # --- per-segment breakdown ---
+    segments = serializers.SerializerMethodField()
+
+    def get_overall(self, obj):
+        return {
+            "total_weight_tonne": obj.total_weight_in_tonne,
+            "total_distance_km": obj.total_distance_km,
+            "total_co2_kg": obj.total_co2_kg,
+            "segment_count": obj.segments.count(),
+        }
+
+    def get_segments(self, obj):
+        segments = obj.segments.all().order_by("sequence_number")
+        return SegmentEmissionBreakdownSerializer(segments, many=True).data
