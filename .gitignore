@@ -220,4 +220,3 @@ __marimo__/
 **/migrations/*.py
 !**/migrations/__init__.py
 .idea/
-requirements*.txt
